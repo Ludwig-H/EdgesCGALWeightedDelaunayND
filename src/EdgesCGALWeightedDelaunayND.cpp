@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 #include <string>
 #include <vector>
 #include <utility>
@@ -37,10 +38,17 @@ static Header read_header(std::istream& in){
   uint32_t hlen32=0; uint16_t hlen16=0; size_t hlen=0;
   if(ver[0]==1){ in.read(reinterpret_cast<char*>(&hlen16),2); hlen=hlen16; }
   else { in.read(reinterpret_cast<char*>(&hlen32),4); hlen=hlen32; }
-  std::string hdr(hlen,'\0'); in.read(hdr.data(), hlen); if(!in) die("header .npy tronqué");
-  auto findq = [&](size_t pos){ auto q1=hdr.find('\'',pos); auto q2=hdr.find('\'',q1+1); return std::pair<size_t,size_t>(q1,q2); };
-  auto p_descr = hdr.find("descr"); if(p_descr==std::string::npos) die("header invalide (descr)");
-  auto [q1,q2] = findq(p_descr); h.descr = hdr.substr(q1+1, q2-q1-1);
+  std::string hdr(hlen,'\0');
+  in.read(hdr.data(), hlen);
+  if(!in) die("header .npy tronqué");
+  auto p_descr = hdr.find("descr");
+  if(p_descr==std::string::npos) die("header invalide (descr)");
+  auto colon = hdr.find(':', p_descr);
+  if(colon==std::string::npos) die("header invalide (descr)");
+  auto q1 = hdr.find('\'', colon);
+  auto q2 = hdr.find('\'', q1+1);
+  if(q1==std::string::npos || q2==std::string::npos) die("header invalide (descr)");
+  h.descr = hdr.substr(q1+1, q2-q1-1);
   auto p_for = hdr.find("fortran_order"); if(p_for==std::string::npos) die("header invalide (fortran_order)");
   h.fortran = hdr.find("True", p_for)!=std::string::npos;
   auto p_shape = hdr.find("shape"); if(p_shape==std::string::npos) die("header invalide (shape)");
@@ -122,8 +130,8 @@ void save_u64_2col(const std::string& path, const std::vector<std::pair<uint64_t
 
 struct PairHash{
   size_t operator()(const std::pair<uint64_t,uint64_t>& p) const noexcept{
-    uint64_t x = p.first*0x9E3779B97F4A7C15ULL ^ (p.second + 0x9E37 + (p.first<<6) + (p.first>>2));
-    return (size_t)x;
+    uint64_t x = p.first ^ (p.second + 0x9E3779B97F4A7C15ULL + (p.first<<6) + (p.first>>2));
+    return static_cast<size_t>(x);
   }
 };
 
