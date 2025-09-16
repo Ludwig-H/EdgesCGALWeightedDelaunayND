@@ -6,6 +6,10 @@
 #include <CGAL/Regular_triangulation.h>
 #include <CGAL/Triangulation_data_structure.h>
 #include <CGAL/Triangulation.h>
+#include <CGAL/Spatial_sort_traits_adapter_d.h>
+#include <CGAL/spatial_sort.h>
+
+#include <boost/property_map/property_map.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -191,6 +195,26 @@ void run(const std::vector<double>& P, const std::vector<double>& W, size_t N, i
 
 } // namespace WeightedND
 
+struct Index_to_point_property_map {
+  using Point_d = WeightedND::K::Point_d;
+  using key_type = std::size_t;
+  using value_type = Point_d;
+  using reference = const Point_d&;
+  using category = boost::readable_property_map_tag;
+
+  const std::vector<Point_d>* points = nullptr;
+
+  Index_to_point_property_map() = default;
+  explicit Index_to_point_property_map(const std::vector<Point_d>& pts)
+    : points(&pts) {}
+};
+
+inline Index_to_point_property_map::reference
+get(const Index_to_point_property_map& map, Index_to_point_property_map::key_type idx)
+{
+  return (*map.points)[idx];
+}
+
 int main(int argc, char** argv){
   if(argc!=4){
     std::fprintf(stderr,"Usage: %s points.npy weights.npy out_edges.npy\n", argv[0]);
@@ -209,17 +233,19 @@ int main(int argc, char** argv){
   std::vector<std::pair<uint64_t,uint64_t>> edges;
   std::vector<size_t> insertion_order(N);
   std::iota(insertion_order.begin(), insertion_order.end(), size_t(0));
-  const size_t dim_s = size_t(dim);
-  auto lexicographic_less = [&P, dim_s](size_t ia, size_t ib) {
-    const double* pa = &P[ia * dim_s];
-    const double* pb = &P[ib * dim_s];
-    for(size_t d = 0; d < dim_s; ++d){
-      if(pa[d] < pb[d]) return true;
-      if(pa[d] > pb[d]) return false;
-    }
-    return ia < ib;
-  };
-  std::sort(insertion_order.begin(), insertion_order.end(), lexicographic_less);
+  const std::size_t dim_s = static_cast<std::size_t>(dim);
+
+  using Point_d = WeightedND::K::Point_d;
+  std::vector<Point_d> spatial_points;
+  spatial_points.reserve(N);
+  for(size_t i = 0; i < N; ++i){
+    const double* coords = &P[i * dim_s];
+    spatial_points.emplace_back(dim, coords, coords + dim_s);
+  }
+
+  Index_to_point_property_map point_map(spatial_points);
+  CGAL::Spatial_sort_traits_adapter_d<WeightedND::K, Index_to_point_property_map> traits(point_map);
+  CGAL::spatial_sort(insertion_order.begin(), insertion_order.end(), traits);
 
   WeightedND::run(P, W, N, dim, insertion_order, edges);
   npy::save_u64_2col(argv[3], edges);
