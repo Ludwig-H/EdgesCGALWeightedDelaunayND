@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iostream>
 #include <algorithm>
+#include <numeric>
 #include <unordered_set>
 
 namespace npy {
@@ -145,17 +146,20 @@ using TDS = CGAL::Triangulation_data_structure<CGAL::Dynamic_dimension_tag, Vb, 
 using RT  = CGAL::Regular_triangulation<K, TDS>;
 
 void run(const std::vector<double>& P, const std::vector<double>& W, size_t N, int dim,
+         const std::vector<size_t>& order,
          std::vector<std::pair<uint64_t,uint64_t>>& edges)
 {
   if(dim<2) npy::die("dimension d>=2 exigée");
   if(W.size()!=N) npy::die("weights.npy: longueur N exigée");
+  if(order.size()!=N) npy::die("ordre d'insertion invalide");
 
   RT rt(dim);
   using BP = typename K::Point_d;
   using WP = typename K::Weighted_point_d;
   using FT = typename K::FT;
 
-  for(size_t i=0;i<N;++i){
+  for(size_t pos=0; pos<N; ++pos){
+    size_t i = order[pos];
     const double* r = &P[i*size_t(dim)];
     BP p(dim, r, r+dim);
     WP wpt(p, FT(W[i]));
@@ -203,7 +207,21 @@ int main(int argc, char** argv){
   if(NW!=N) npy::die("weights.npy: longueur N exigée");
 
   std::vector<std::pair<uint64_t,uint64_t>> edges;
-  WeightedND::run(P, W, N, dim, edges);
+  std::vector<size_t> insertion_order(N);
+  std::iota(insertion_order.begin(), insertion_order.end(), size_t(0));
+  const size_t dim_s = size_t(dim);
+  auto lexicographic_less = [&P, dim_s](size_t ia, size_t ib) {
+    const double* pa = &P[ia * dim_s];
+    const double* pb = &P[ib * dim_s];
+    for(size_t d = 0; d < dim_s; ++d){
+      if(pa[d] < pb[d]) return true;
+      if(pa[d] > pb[d]) return false;
+    }
+    return ia < ib;
+  };
+  std::sort(insertion_order.begin(), insertion_order.end(), lexicographic_less);
+
+  WeightedND::run(P, W, N, dim, insertion_order, edges);
   npy::save_u64_2col(argv[3], edges);
   std::fprintf(stderr,"[info] N=%zu d=%d edges=%zu\n", N, dim, edges.size());
   return 0;
